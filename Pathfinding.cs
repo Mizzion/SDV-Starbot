@@ -16,6 +16,7 @@ namespace Starbot.Pathfinder
         public int G;
         public int H;
         public Location Parent;
+        public bool Preferable = false;
     }
 
     public class Pathfinder
@@ -61,7 +62,7 @@ namespace Starbot.Pathfinder
                     {
                         // compute its score, set the parent  
                         adjacentSquare.G = g;
-                        adjacentSquare.H = ComputeHScore(adjacentSquare.X, adjacentSquare.Y, target.X, target.Y);
+                        adjacentSquare.H = ComputeHScore(adjacentSquare.Preferable, adjacentSquare.X, adjacentSquare.Y, target.X, target.Y);
                         adjacentSquare.F = adjacentSquare.G + adjacentSquare.H;
                         adjacentSquare.Parent = current;
 
@@ -82,9 +83,13 @@ namespace Starbot.Pathfinder
                 }
             }
 
-            Location end = current;
-
-            if (current == null) return null; //no path, return null
+            //make sure path is complete
+            if (current == null) return null;
+            if (current.X != targetX || current.Y != targetY)
+            {
+                Mod.instance.Monitor.Log("No path available.", StardewModdingAPI.LogLevel.Warn);
+                return null;
+            }
 
             // if path exists, let's pack it up for return
             var returnPath = new List<Tuple<int, int>>();
@@ -104,32 +109,38 @@ namespace Starbot.Pathfinder
             if (IsPassable(map, x, y - 1))
             {
                 Location node = openList.Find(l => l.X == x && l.Y == y - 1);
-                if (node == null) list.Add(new Location() { X = x, Y = y - 1 });
+                if (node == null) list.Add(new Location() { Preferable = IsPreferableWalkingSurface(map, x, y), X = x, Y = y - 1 });
                 else list.Add(node);
             }
 
             if (IsPassable(map, x, y + 1))
             {
                 Location node = openList.Find(l => l.X == x && l.Y == y + 1);
-                if (node == null) list.Add(new Location() { X = x, Y = y + 1 });
+                if (node == null) list.Add(new Location() { Preferable = IsPreferableWalkingSurface(map, x, y), X = x, Y = y + 1 });
                 else list.Add(node);
             }
 
             if (IsPassable(map, x - 1, y))
             {
                 Location node = openList.Find(l => l.X == x - 1 && l.Y == y);
-                if (node == null) list.Add(new Location() { X = x - 1, Y = y });
+                if (node == null) list.Add(new Location() { Preferable = IsPreferableWalkingSurface(map, x, y), X = x - 1, Y = y });
                 else list.Add(node);
             }
 
             if (IsPassable(map, x + 1, y))
             {
                 Location node = openList.Find(l => l.X == x + 1 && l.Y == y);
-                if (node == null) list.Add(new Location() { X = x + 1, Y = y });
+                if (node == null) list.Add(new Location() { Preferable = IsPreferableWalkingSurface(map, x, y), X = x + 1, Y = y });
                 else list.Add(node);
             }
 
             return list;
+        }
+
+        static bool IsPreferableWalkingSurface(GameLocation location, int x, int y)
+        {
+            //todo, make roads more desireable
+            return false;
         }
 
         static bool IsPassable(GameLocation location, int x, int y)
@@ -143,12 +154,12 @@ namespace Starbot.Pathfinder
             bool isOnMap = location.isTileOnMap(v);
             bool isOccupied = location.isTileOccupiedIgnoreFloors(v, "");
             bool isPassable = location.isTilePassable(new xTile.Dimensions.Location((int)x, (int)y), Game1.viewport);
-            return ((isWarp || isOnMap) && !isOccupied && isPassable);
+            return (isWarp || (isOnMap && !isOccupied && isPassable));
         }
 
-        static int ComputeHScore(int x, int y, int targetX, int targetY)
+        static int ComputeHScore(bool preferable, int x, int y, int targetX, int targetY)
         {
-            return Math.Abs(targetX - x) + Math.Abs(targetY - y);
+            return (Math.Abs(targetX - x) + Math.Abs(targetY - y)) - (preferable ? 1 : 0);
         }
     }
 }

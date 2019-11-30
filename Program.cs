@@ -21,8 +21,8 @@ namespace Starbot
         private void GameLoop_UpdateTicked(object sender, UpdateTickedEventArgs e)
         {
             if (!BotActive) return;
-            Brain.Update();
-            if (Brain.WantsToStop)
+            Core.Update();
+            if (Core.WantsToStop)
             {
                 Monitor.Log("Bot is going to stop itself to prevent further complications.", LogLevel.Warn);
                 ToggleBot();
@@ -45,14 +45,19 @@ namespace Starbot
                 Helper.Input.Suppress(SButton.B);
                 ToggleBot();
             }
+
+            else if(e.Button == SButton.F)
+            {
+                Monitor.Log("Player location: " + StardewValley.Game1.player.getTileX() + ", " + StardewValley.Game1.player.getTileY());
+            }
         }
 
         private void ToggleBot()
         {
             BotActive = !BotActive;
             Monitor.Log("Toggled bot status. Bot is now " + (BotActive ? "ON." : "OFF."), LogLevel.Warn);
-            if (!BotActive) Brain.ReleaseKeys();
-            else Brain.Reset();
+            if (!BotActive) Core.ReleaseKeys();
+            else Core.Reset();
         }
     }
 }
