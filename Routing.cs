@@ -27,7 +27,7 @@ namespace Starbot
                         //Mod.instance.Monitor.Log("Learning about " + key, LogLevel.Alert);
                         MapConnections[key] = new HashSet<string>();
                         foreach (var w in gl.warps) MapConnections[key].Add(w.TargetName);
-                        //foreach (var d in gl.doors.Values) MapConnections[key].Add(d);
+                        foreach (var d in gl.doors.Values) MapConnections[key].Add(d);
                         //foreach (var s in MapConnections[key]) Mod.instance.Monitor.Log("It connects to " + s, LogLevel.Warn);
                     }
                 }

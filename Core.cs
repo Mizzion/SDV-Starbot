@@ -4,16 +4,13 @@ using StardewValley;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using WindowsInput;
+using System.Reflection;
 
 namespace Starbot
 {
     public static class Core
     {
         public static bool WantsToStop = false;
-        internal static InputSimulator Inputter = new InputSimulator();
 
         private static bool MovingDown = false;
         private static bool MovingLeft = false;
@@ -25,45 +22,109 @@ namespace Starbot
         private static int LastTileX = -3, LastTileY = -3;
         private static string LastLocationName = null;
         private static int UpdatesSinceCoordinateChange = 0;
+        private static int LastGameDay = -3;
+
+        public static bool IsSleeping = false;
+
+        //Objectives
+        private static bool IsBored = true;
+        private static Objective Objective = null;
+        private static List<string> ObjectivesCompletedToday = new List<string>();
+        private static List<Objective> ObjectivePool = new List<Objective>();
+
+        private static void FindNewObjective()
+        {
+            if(ObjectivePool.Count == 0)
+            {
+                //sleep time
+                Mod.instance.Monitor.Log("Bot has no remaining objectives for today. Time for bed!", LogLevel.Alert);
+                Objective = new Objectives.ObjectiveSleep();
+                Mod.instance.Monitor.Log("New objective: " + Objective.AnnounceMessage, LogLevel.Info);
+            } else
+            {
+                int randomObjective = Mod.RNG.Next(ObjectivePool.Count);
+                Objective = ObjectivePool[randomObjective];
+                ObjectivePool.RemoveAt(randomObjective);
+                Mod.instance.Monitor.Log("New objective: " + Objective.AnnounceMessage, LogLevel.Info);
+            }
+        }
+
+        private static void ResetObjectivePool()
+        {
+            ObjectivePool.Clear();
+            ObjectivePool.Add(new Objectives.ObjectiveForage("BusStop"));
+            ObjectivePool.Add(new Objectives.ObjectiveForage("Beach"));
+            ObjectivePool.Add(new Objectives.ObjectiveForage("Forest"));
+            ObjectivePool.Add(new Objectives.ObjectiveForage("Mountain"));
+            ObjectivePool.Add(new Objectives.ObjectiveForage("Town"));
+        }
+
+        private static void FailObjective()
+        {
+            if(Objective != null)
+            {
+                Mod.instance.Monitor.Log("Objective failed: " + Objective.AnnounceMessage, LogLevel.Info);
+                Objective.Fail();
+                if (Objective.FailureCount < 3) ObjectivePool.Add(Objective);
+                else
+                {
+                    Mod.instance.Monitor.Log("Skipping objective for today (too many failures): " + Objective.AnnounceMessage, LogLevel.Info);
+                }
+                Objective = null;
+                IsRouting = false;
+                IsPathfinding = false;
+                StopMovingDown();
+                StopMovingLeft();
+                StopMovingRight();
+                StopMovingUp();
+            }
+        }
 
         //Routing
         public static bool IsRouting = false;
+        private static bool IsCriticalRoute = false;
         private static int RoutingDestinationX = -3, RoutingDestinationY = -3;
         private static bool HasRoutingDestination { get { return RoutingDestinationX != -3 && RoutingDestinationY != -3; } }
         private static List<string> Route = null;
 
-        public static void RouteTo(string targetMap, int targetX = -3, int targetY = -3)
+        public static bool RouteTo(string targetMap, int targetX = -3, int targetY = -3, bool critical = false)
         {
             if (Game1.player.currentLocation.Name != targetMap)
             {
-                Mod.instance.Monitor.Log("Routing to: " + targetMap + (targetY == -1 ? targetX + ", " + targetY : ""), LogLevel.Info);
+                Mod.instance.Monitor.Log("Routing to: " + targetMap + (targetY == -1 ? targetX + ", " + targetY : ""), LogLevel.Trace);
                 //calculate a route to the destination
                 var route = Routing.GetRoute(targetMap);
                 if (route == null || route.Count < 2)
                 {
-                    Mod.instance.Monitor.Log("Routing failed: no route!", LogLevel.Alert);
-                    return;
-                } /*else
+                    if (critical)
+                    {
+                        Mod.instance.Monitor.Log("Routing failed: no route!", LogLevel.Warn);
+                        FailObjective();
+                    }
+                    return false;
+                } else
                 {
                     //debug, print route:
                     string routeInfo = "Route: ";
                     foreach (string s in route) routeInfo += s + ", ";
-                    Mod.instance.Monitor.Log(routeInfo.Substring(0, routeInfo.Length - 2), LogLevel.Warn);
-                }*/
-
-                //route.RemoveAt(0); //remove the current map from the list
+                    Mod.instance.Monitor.Log(routeInfo.Substring(0, routeInfo.Length - 2), LogLevel.Trace);
+                }
 
                 //set the bot's route
                 IsRouting = true;
+                IsCriticalRoute = critical;
                 RoutingDestinationX = targetX;
                 RoutingDestinationY = targetY;
                 Route = route;
+                AdvanceRoute();
+                return true;
             } else if(targetX != -3 && targetY != -3)
             {
                 RoutingDestinationX = targetX;
                 RoutingDestinationY = targetY;
-                PathfindTo(targetX, targetY);
+                return PathfindTo(targetX, targetY, critical);
             }
+            return false;
         }
 
         private static void ClearRoutingDestination()
@@ -76,7 +137,7 @@ namespace Starbot
         private static void AdvanceRoute()
         {
             if (!IsRouting) return;
-            Mod.instance.Monitor.Log("Advancing route...", LogLevel.Info);
+            Mod.instance.Monitor.Log("Advancing route...", LogLevel.Trace);
             Route.RemoveAt(0); //remove the current map from the list
             if (Route.Count == 0)
             {
@@ -86,7 +147,7 @@ namespace Starbot
                 if(HasRoutingDestination)
                 {
                     //pathfind to final destination coordinates
-                    PathfindTo(RoutingDestinationX, RoutingDestinationY);
+                    PathfindTo(RoutingDestinationX, RoutingDestinationY, IsCriticalRoute);
                 }
             } else
             {
@@ -95,43 +156,48 @@ namespace Starbot
                 {
                     if (w.TargetName == Route[0])
                     {
-                        PathfindTo(w.X, w.Y);
+                        PathfindTo(w.X, w.Y, IsCriticalRoute);
                         break;
                     }
                 }
-                /*  todo, doors
-                    foreach (var w in Game1.player.currentLocation.doors.Values)
+                foreach (var w in Game1.player.currentLocation.doors.Keys)
+                {
+                    if (Game1.player.currentLocation.doors[w] == Route[0])
                     {
-                        if (w == CurrentWorldRoute[0])
-                        {
-                            routing = true;
-                            MoveToCoordinate(w.X, w.Y);
-                        }
+                        PathfindTo(w.X, w.Y + 1, IsCriticalRoute, true);
+                        break;
                     }
-                */
+                }
             }
         }
 
         //Pathfinding
         private static bool IsPathfinding = false;
         private static int PathfindingDestinationX = -3, PathfindingDestinationY = -3;
+        private static bool PathfindingOpenDoor = false;
         private static List<Tuple<int,int>> Path = null;
 
-        private static void PathfindTo(int x, int y)
+        private static bool PathfindTo(int x, int y, bool critical = false, bool openDoor = false)
         {
-            Mod.instance.Monitor.Log("Pathfinding to: " + x + ", " + y, LogLevel.Info);
+            Mod.instance.Monitor.Log("Pathfinding to: " + x + ", " + y, LogLevel.Trace);
             var path = Pathfinder.Pathfinder.FindPath(Game1.player.currentLocation, Game1.player.getTileX(), Game1.player.getTileY(), x, y);
             if (path == null)
             {
-                Mod.instance.Monitor.Log("Pathfinding failed: no path!", LogLevel.Alert);
-                return;
+                if (critical)
+                {
+                    Mod.instance.Monitor.Log("Pathfinding failed: no path!", LogLevel.Alert);
+                    FailObjective();
+                }
+                return false;
             }
 
             //set the bot's path
             IsPathfinding = true;
             PathfindingDestinationX = x;
             PathfindingDestinationY = y;
+            PathfindingOpenDoor = openDoor;
             Path = path;
+            return true;
         }
 
         private static void ClearPathfindingDestination()
@@ -147,8 +213,13 @@ namespace Starbot
             {
                 Path = null;
                 IsPathfinding = false;
-                ClearMoveTarget();
+                //ClearMoveTarget();
+                ClearPathfindingDestination();
                 Mod.instance.Monitor.Log("Pathfinding complete.", LogLevel.Alert);
+                if (PathfindingOpenDoor)
+                {
+                    DoOpenDoor();
+                }
                 return;
             }
             var next = Path[0];
@@ -161,7 +232,7 @@ namespace Starbot
         private static int MoveTargetX = -3;
         private static int MoveTargetY = -3;
 
-        private static void MoveTo(int x, int y)
+        public static void MoveTo(int x, int y)
         {
             MoveTargetX = x;
             MoveTargetY = y;
@@ -175,7 +246,7 @@ namespace Starbot
 
         private static int StopX = 0; //a delay on releasing keys so the animation isnt janky from spamming the button on and off
         private static int StopY = 0;
-        private static readonly int StopDelay = 8;
+        private static readonly int StopDelay = 16;
         private static void AdvanceMove()
         {
             int px = Game1.player.getTileX();
@@ -218,6 +289,7 @@ namespace Starbot
             ClearMoveTarget();
             ClearPathfindingDestination();
             IsPathfinding = false;
+            PathfindingOpenDoor = false;
             Path = null;
             IsRouting = false;
             ClearRoutingDestination();
@@ -235,14 +307,76 @@ namespace Starbot
             MovingRight = false;
             MovingUp = false;
 
-            RouteTo("Beach", 38, 6); //for testing
+            Objective = null;
+            ObjectivesCompletedToday.Clear();
+            ObjectivePool.Clear();
+            IsBored = false;
+            LastGameDay = -3;
         }
 
         public static void Update()
         {
+            Mod.Input.Update();
+
+            //are we waiting on action button
+            if (ActionButtonTimer > 0)
+            {
+                ActionButtonTimer--;
+                StopMovingDown();
+                StopMovingLeft();
+                StopMovingRight();
+                StopMovingUp();
+                if (ActionButtonTimer == 0)
+                {
+                    StopActionButton();
+                }
+                return;
+            }
+
+            //are we waiting on a tool swing
+            if (SwingToolTimer > 0)
+            {
+                SwingToolTimer--;
+                StopMovingDown();
+                StopMovingLeft();
+                StopMovingRight();
+                StopMovingUp();
+                if (SwingToolTimer == 0)
+                {
+                    StopUseTool();
+                }
+                return;
+            }
+            //are we waiting on facing
+            if (FaceTimer > 0)
+            {
+                FaceTimer--;
+                if(FaceTimer == 0)
+                {
+                    StopMovingDown();
+                    StopMovingLeft();
+                    StopMovingRight();
+                    StopMovingUp();
+                }
+                return;
+            }
             //only update navigation while navigation is possible
             if (Context.CanPlayerMove)
             {
+                //new day
+                if (LastGameDay != Game1.dayOfMonth)
+                {
+                    //new day
+                    IsSleeping = false;
+                    ObjectivesCompletedToday.Clear();
+                    Objective = null;
+                    ResetObjectivePool();
+                    LastGameDay = Game1.dayOfMonth;
+                }
+
+                //shh don't wake the bot
+                if (IsSleeping) return;
+
                 //cache player position
                 int px = Game1.player.getTileX();
                 int py = Game1.player.getTileY();
@@ -257,10 +391,20 @@ namespace Starbot
                 //on logical location change
                 if(Game1.currentLocation.Name != LastLocationName)
                 {
+                    if (OpeningDoor)
+                    {
+                        StopActionButton();
+                        OpeningDoor = false;
+                    }
                     LastLocationName = Game1.currentLocation.Name;
                     ClearMoveTarget();
                     ReleaseKeys();
-                    if(IsRouting) AdvanceRoute();
+                    if(IsRouting && Route[0] == Game1.currentLocation.Name) AdvanceRoute();
+                }
+
+                if (OpeningDoor)
+                {
+                    return; //let's not interfere
                 }
 
                 //if we don't have a move target, check the path for one
@@ -269,12 +413,11 @@ namespace Starbot
                     //is pathfinding complete?
                     if(px == PathfindingDestinationX && py == PathfindingDestinationY)
                     {
-                        IsPathfinding = false;
-                        Path = null;
-                        ClearPathfindingDestination();
-                        
+                        //move to the next node in the path
+                        AdvancePath();
+
                         //check for route destination and announce
-                        if(HasRoutingDestination && px == RoutingDestinationX && py == RoutingDestinationY)
+                        if (HasRoutingDestination && px == RoutingDestinationX && py == RoutingDestinationY)
                         {
                             Mod.instance.Monitor.Log("Routing complete.", LogLevel.Alert);
                             ClearMoveTarget();
@@ -308,7 +451,75 @@ namespace Starbot
                     UpdatesSinceCoordinateChange++;
                     if (!IsStuck && UpdatesSinceCoordinateChange > 60 * 5) OnStuck();
                 }
+
+
+
+                //bored?
+                if(!HasMoveTarget && !IsPathfinding && !IsRouting)
+                {
+                    IsBored = true;
+                }
+
+                if (IsBored)
+                {
+                    if(Objective != null)
+                    {
+                        if (Objective.IsComplete)
+                        {
+                            string objName = Objective.GetType().Name;
+                            Mod.instance.Monitor.Log("Objective completed: " + Objective.AnnounceMessage, LogLevel.Info);
+                            ObjectivesCompletedToday.Add(objName);
+                            Objective = null;
+                        } else
+                        {
+                            IsBored = false;
+                            Objective.Step();
+                        }
+                    } else
+                    {
+                        FindNewObjective();
+                    }
+                }
+            } else
+            {
+                if(Objective != null && !Objective.IsComplete)
+                {
+                    Objective.CantMoveUpdate();
+                }
             }
+        }
+
+        public static bool EquipToolIfOnHotbar(string name)
+        {
+            var t = Game1.player.getToolFromName(name);
+            if (t == null)
+            {
+                Mod.instance.Monitor.Log("Could not equip tool: " + name + " (not found in inventory)", LogLevel.Info);
+                return false;
+            }
+            for (int index = 0; index < 12; ++index)
+            {
+                if (Game1.player.items.Count > index && Game1.player.items.ElementAt<Item>(index) != null)
+                {
+                    if(Game1.player.items[index] == t)
+                    {
+                        //found it
+                        Mod.instance.Monitor.Log("Equipping tool: " + name, LogLevel.Info);
+                        Game1.player.CurrentToolIndex = index;
+                        return true;
+                    }
+                }
+            }
+            Mod.instance.Monitor.Log("Could not equip tool: " + name + " (not found on hotbar)", LogLevel.Info);
+            return false;
+        }
+
+        public static bool OpeningDoor = false;
+        private static void DoOpenDoor()
+        {
+            OpeningDoor = true;
+            StartMovingUp();
+            StartActionButton();
         }
 
         private static void OnStuck()
@@ -317,57 +528,135 @@ namespace Starbot
             Mod.instance.Monitor.Log("Bot is stuck.", LogLevel.Info);
             UpdatesSinceCoordinateChange = 0;
             ReleaseKeys();
+            if(Objective != null)
+            {
+                FailObjective();
+                IsStuck = false;
+            }
+        }
+
+        private static readonly int ActionButtonTime = 30;
+        private static int ActionButtonTimer = 0;
+        public static void DoActionButton(bool stop = true)
+        {
+            if (stop) { 
+                StopMovingDown();
+                StopMovingLeft();
+                StopMovingRight();
+                StopMovingUp();
+            }
+            StartActionButton();
+            ActionButtonTimer = ActionButtonTime;
+        }
+
+        private static void StartActionButton()
+        {
+            Mod.Input.StartActionButton();
+        }
+
+        private static void StopActionButton()
+        {
+            Mod.Input.StopActionButton();
+        }
+
+        private static readonly int SwingToolTime = 30;
+        private static int SwingToolTimer = 0;
+        public static void SwingTool()
+        {
+            StopMovingDown();
+            StopMovingLeft();
+            StopMovingRight();
+            StopMovingUp();
+            StartUseTool();
+            SwingToolTimer = SwingToolTime;
+        }
+
+        private static void StartUseTool()
+        {
+            Mod.Input.StartUseTool();
+        }
+
+        private static void StopUseTool()
+        {
+            Mod.Input.StopUseTool();
+        }
+
+        private static readonly int FaceTime = 15;
+        private static int FaceTimer = 0;
+
+        public static void FaceLeft()
+        {
+            FaceTimer = FaceTime;
+            StartMovingLeft();
+        }
+
+        public static void FaceRight()
+        {
+            FaceTimer = FaceTime;
+            StartMovingRight();
+        }
+
+        public static void FaceUp()
+        {
+            FaceTimer = FaceTime;
+            StartMovingUp();
+        }
+
+        public static void FaceDown()
+        {
+            FaceTimer = FaceTime;
+            StartMovingDown();
         }
 
         private static void StartMovingDown()
         {
             if (MovingUp) StopMovingUp();
-            if(!MovingDown) KeyDown(Keys.S);
+            Mod.Input.StartMoveDown();
             MovingDown = true;
         }
 
         private static void StopMovingDown()
         {
-            if(MovingDown) KeyUp(Keys.S);
+            Mod.Input.StopMoveDown();
             MovingDown = false;
         }
 
         private static void StartMovingLeft()
         {
             if (MovingRight) StopMovingRight();
-            if (!MovingLeft) KeyDown(Keys.A);
+            Mod.Input.StartMoveLeft();
             MovingLeft = true;
         }
 
         private static void StopMovingLeft()
         {
-            if (MovingLeft) KeyUp(Keys.A);
+            Mod.Input.StopMoveLeft();
             MovingLeft = false;
         }
 
         private static void StartMovingUp()
         {
             if (MovingDown) StopMovingDown();
-            if (!MovingUp) KeyDown(Keys.W);
+            Mod.Input.StartMoveUp();
             MovingUp = true;
         }
 
         private static void StopMovingUp()
         {
-            if (MovingUp) KeyUp(Keys.W);
+            Mod.Input.StopMoveUp();
             MovingUp = false;
         }
 
         private static void StartMovingRight()
         {
             if (MovingLeft) StopMovingLeft();
-            if (!MovingRight) KeyDown(Keys.D);
+            Mod.Input.StartMoveRight();
             MovingRight = true;
         }
 
         private static void StopMovingRight()
         {
-            if (MovingRight) KeyUp(Keys.D);
+            Mod.Input.StopMoveRight();
             MovingRight = false;
         }
 
@@ -379,14 +668,19 @@ namespace Starbot
             StopMovingUp();
         }
 
-        private static void KeyDown(Keys key)
+        public static void AnswerGameLocationDialogue(int selection)
         {
-            Inputter.Keyboard.KeyDown((WindowsInput.Native.VirtualKeyCode) key);
-        }
-
-        private static void KeyUp(Keys key)
-        {
-            Inputter.Keyboard.KeyUp((WindowsInput.Native.VirtualKeyCode) key);
+            if(Game1.activeClickableMenu is StardewValley.Menus.DialogueBox)
+            {
+                var db = Game1.activeClickableMenu as StardewValley.Menus.DialogueBox;
+                var responses = (List < Response > )typeof(StardewValley.Menus.DialogueBox).GetField("responses", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(db);
+                Mod.instance.Monitor.Log("Responding to dialogue with selection: " + responses[selection].responseKey);
+                Game1.currentLocation.answerDialogue(responses[selection]);
+                Game1.dialogueUp = false;
+                Game1.activeClickableMenu = null;
+                Game1.playSound("dialogueCharacterClose");
+                Game1.currentDialogueCharacterIndex = 0;
+            }
         }
     }
 }

@@ -9,10 +9,13 @@ namespace Starbot
         internal static Mod instance;
         internal static Random RNG = new Random(Guid.NewGuid().GetHashCode());
         internal static bool BotActive = false;
+        internal static Input2 Input = new Input2();
 
         public override void Entry(IModHelper helper)
         {
             instance = this;
+
+            //Input.Setup();
 
             Helper.Events.Input.ButtonPressed += Input_ButtonPressed;
             Helper.Events.GameLoop.UpdateTicked += GameLoop_UpdateTicked;
@@ -35,6 +38,10 @@ namespace Starbot
             if (e.IsDown(SButton.LeftShift)) shifting = true;
             if (e.IsDown(SButton.RightShift)) shifting = true;
 
+            //prevent vanilla from disabling the input simulator on esc key down
+            if (BotActive && e.IsDown(SButton.Escape)) Helper.Input.Suppress(SButton.Escape);
+
+            //bot toggle hotkey
             if (e.Button == SButton.B && shifting)
             {
                 if (!Context.IsWorldReady && !BotActive)
@@ -56,8 +63,16 @@ namespace Starbot
         {
             BotActive = !BotActive;
             Monitor.Log("Toggled bot status. Bot is now " + (BotActive ? "ON." : "OFF."), LogLevel.Warn);
-            if (!BotActive) Core.ReleaseKeys();
-            else Core.Reset();
+            if (!BotActive)
+            {
+                Input.UninstallSimulator();
+                Core.ReleaseKeys();
+            }
+            else
+            {
+                Input.InstallSimulator();
+                Core.Reset();
+            }
         }
     }
 }

@@ -39,11 +39,11 @@ namespace Starbot.Pathfinder
                 var lowest = openList.Min(l => l.F);
                 current = openList.First(l => l.F == lowest);
 
-                // add the current square to closed, remove from open
+                // add to closed, remove from open
                 closedList.Add(current);
                 openList.Remove(current);
 
-                // if we added the destination to the closed list, we've found a path  
+                // if closed contains destination, we're done
                 if (closedList.FirstOrDefault(l => l.X == target.X && l.Y == target.Y) != null) break;
 
                 var adjacentSquares = GetWalkableAdjacentSquares(current.X, current.Y, location, openList);
@@ -51,28 +51,28 @@ namespace Starbot.Pathfinder
 
                 foreach (var adjacentSquare in adjacentSquares)
                 {
-                    // if this adjacent square is already in the closed list, ignore it  
+                    // if closed, ignore 
                     if (closedList.FirstOrDefault(l => l.X == adjacentSquare.X
                         && l.Y == adjacentSquare.Y) != null)
                         continue;
 
-                    // if it's not in the open list...  
+                    // if it's not in open
                     if (openList.FirstOrDefault(l => l.X == adjacentSquare.X
                         && l.Y == adjacentSquare.Y) == null)
                     {
-                        // compute its score, set the parent  
+                        // compute score, set parent  
                         adjacentSquare.G = g;
                         adjacentSquare.H = ComputeHScore(adjacentSquare.Preferable, adjacentSquare.X, adjacentSquare.Y, target.X, target.Y);
                         adjacentSquare.F = adjacentSquare.G + adjacentSquare.H;
                         adjacentSquare.Parent = current;
 
-                        // and add it to the open list  
+                        // and add it to open
                         openList.Insert(0, adjacentSquare);
                     }
                     else
                     {
-                        // test if using the current G score makes the adjacent square's F score  
-                        // lower, if yes update the parent because it means it's a better path  
+                        // test if using the current G score makes the adjacent square's F score lower
+                        // if yes update the parent because it means it's a better path  
                         if (g + adjacentSquare.H < adjacentSquare.F)
                         {
                             adjacentSquare.G = g;
@@ -154,7 +154,7 @@ namespace Starbot.Pathfinder
             bool isOnMap = location.isTileOnMap(v);
             bool isOccupied = location.isTileOccupiedIgnoreFloors(v, "");
             bool isPassable = location.isTilePassable(new xTile.Dimensions.Location((int)x, (int)y), Game1.viewport);
-            return (isWarp || (isOnMap && !isOccupied && isPassable));
+            return (isWarp || (isOnMap && !isOccupied && isPassable)); //warps must be passable even off-map
         }
 
         static int ComputeHScore(bool preferable, int x, int y, int targetX, int targetY)
