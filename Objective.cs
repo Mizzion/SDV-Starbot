@@ -15,6 +15,8 @@ namespace Starbot
         public virtual int FailureCount { get; set; }
 
         public abstract string AnnounceMessage { get; }
+        public abstract string UniquePoolId { get; }
+        public abstract bool Cooperative { get; }
 
         public virtual void Fail()
         {

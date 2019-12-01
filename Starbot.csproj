@@ -50,8 +50,10 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Core.cs" />
+    <Compile Include="Extensions.cs" />
     <Compile Include="Input2.cs" />
     <Compile Include="Objective.cs" />
+    <Compile Include="Objectives\ObjectiveClearDebris.cs" />
     <Compile Include="Objectives\ObjectiveForage.cs" />
     <Compile Include="Objectives\ObjectiveSleep.cs" />
     <Compile Include="Pathfinding.cs" />

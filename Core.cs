@@ -1,4 +1,5 @@
-﻿using Microsoft.Xna.Framework.Input;
+﻿using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
 using StardewModdingAPI;
 using StardewValley;
 using System;
@@ -30,7 +31,7 @@ namespace Starbot
         private static bool IsBored = true;
         private static Objective Objective = null;
         private static List<string> ObjectivesCompletedToday = new List<string>();
-        private static List<Objective> ObjectivePool = new List<Objective>();
+        public static List<Objective> ObjectivePool = new List<Objective>();
 
         private static void FindNewObjective()
         {
@@ -46,6 +47,10 @@ namespace Starbot
                 Objective = ObjectivePool[randomObjective];
                 ObjectivePool.RemoveAt(randomObjective);
                 Mod.instance.Monitor.Log("New objective: " + Objective.AnnounceMessage, LogLevel.Info);
+                if (Game1.IsMultiplayer && !Objective.Cooperative)
+                {
+                    Mod.instance.Helper.Multiplayer.SendMessage<string>(Objective.UniquePoolId, "taskAssigned");
+                }
             }
         }
 
@@ -55,11 +60,13 @@ namespace Starbot
             ObjectivePool.Add(new Objectives.ObjectiveForage("BusStop"));
             ObjectivePool.Add(new Objectives.ObjectiveForage("Beach"));
             ObjectivePool.Add(new Objectives.ObjectiveForage("Forest"));
+            ObjectivePool.Add(new Objectives.ObjectiveForage("Backwoods"));
             ObjectivePool.Add(new Objectives.ObjectiveForage("Mountain"));
             ObjectivePool.Add(new Objectives.ObjectiveForage("Town"));
+            ObjectivePool.Add(new Objectives.ObjectiveClearDebris("Farm"));
         }
 
-        private static void FailObjective()
+        public static void FailObjective()
         {
             if(Objective != null)
             {
@@ -87,11 +94,11 @@ namespace Starbot
         private static bool HasRoutingDestination { get { return RoutingDestinationX != -3 && RoutingDestinationY != -3; } }
         private static List<string> Route = null;
 
-        public static bool RouteTo(string targetMap, int targetX = -3, int targetY = -3, bool critical = false)
+        public static bool RouteTo(string targetMap, int targetX = -3, int targetY = -3, bool critical = false, int localCutoff = -1)
         {
-            if (Game1.player.currentLocation.Name != targetMap)
+            if (Game1.player.currentLocation.NameOrUniqueName != targetMap)
             {
-                Mod.instance.Monitor.Log("Routing to: " + targetMap + (targetY == -1 ? targetX + ", " + targetY : ""), LogLevel.Trace);
+                //Mod.instance.Monitor.Log("Routing to: " + targetMap + (targetY == -1 ? targetX + ", " + targetY : ""), LogLevel.Trace);
                 //calculate a route to the destination
                 var route = Routing.GetRoute(targetMap);
                 if (route == null || route.Count < 2)
@@ -105,9 +112,9 @@ namespace Starbot
                 } else
                 {
                     //debug, print route:
-                    string routeInfo = "Route: ";
-                    foreach (string s in route) routeInfo += s + ", ";
-                    Mod.instance.Monitor.Log(routeInfo.Substring(0, routeInfo.Length - 2), LogLevel.Trace);
+                    //string routeInfo = "Route: ";
+                    //foreach (string s in route) routeInfo += s + ", ";
+                    //Mod.instance.Monitor.Log(routeInfo.Substring(0, routeInfo.Length - 2), LogLevel.Trace);
                 }
 
                 //set the bot's route
@@ -122,7 +129,7 @@ namespace Starbot
             {
                 RoutingDestinationX = targetX;
                 RoutingDestinationY = targetY;
-                return PathfindTo(targetX, targetY, critical);
+                return PathfindTo(targetX, targetY, critical, false, localCutoff);
             }
             return false;
         }
@@ -137,7 +144,7 @@ namespace Starbot
         private static void AdvanceRoute()
         {
             if (!IsRouting) return;
-            Mod.instance.Monitor.Log("Advancing route...", LogLevel.Trace);
+            //Mod.instance.Monitor.Log("Advancing route...", LogLevel.Trace);
             Route.RemoveAt(0); //remove the current map from the list
             if (Route.Count == 0)
             {
@@ -157,7 +164,7 @@ namespace Starbot
                     if (w.TargetName == Route[0])
                     {
                         PathfindTo(w.X, w.Y, IsCriticalRoute);
-                        break;
+                        return;
                     }
                 }
                 foreach (var w in Game1.player.currentLocation.doors.Keys)
@@ -165,9 +172,22 @@ namespace Starbot
                     if (Game1.player.currentLocation.doors[w] == Route[0])
                     {
                         PathfindTo(w.X, w.Y + 1, IsCriticalRoute, true);
-                        break;
+                        return;
                     }
                 }
+                if (Game1.player.currentLocation is StardewValley.Locations.BuildableGameLocation)
+                {
+                    StardewValley.Locations.BuildableGameLocation bl = Game1.player.currentLocation as StardewValley.Locations.BuildableGameLocation;
+                    foreach (var b in bl.buildings)
+                    {
+                        if(b.indoors.Value.NameOrUniqueName == Route[0])
+                        {
+                            PathfindTo(b.getPointForHumanDoor().X, b.getPointForHumanDoor().Y + 1, IsCriticalRoute, true);
+                            return;
+                        }
+                    }
+                }
+
             }
         }
 
@@ -177,10 +197,10 @@ namespace Starbot
         private static bool PathfindingOpenDoor = false;
         private static List<Tuple<int,int>> Path = null;
 
-        private static bool PathfindTo(int x, int y, bool critical = false, bool openDoor = false)
+        private static bool PathfindTo(int x, int y, bool critical = false, bool openDoor = false, int cutoff = -1)
         {
-            Mod.instance.Monitor.Log("Pathfinding to: " + x + ", " + y, LogLevel.Trace);
-            var path = Pathfinder.Pathfinder.FindPath(Game1.player.currentLocation, Game1.player.getTileX(), Game1.player.getTileY(), x, y);
+            //Mod.instance.Monitor.Log("Pathfinding to: " + x + ", " + y, LogLevel.Trace);
+            var path = Pathfinder.Pathfinder.FindPath(Game1.player.currentLocation, Game1.player.getTileX(), Game1.player.getTileY(), x, y, cutoff);
             if (path == null)
             {
                 if (critical)
@@ -215,7 +235,7 @@ namespace Starbot
                 IsPathfinding = false;
                 //ClearMoveTarget();
                 ClearPathfindingDestination();
-                Mod.instance.Monitor.Log("Pathfinding complete.", LogLevel.Alert);
+                //Mod.instance.Monitor.Log("Pathfinding complete.", LogLevel.Alert);
                 if (PathfindingOpenDoor)
                 {
                     DoOpenDoor();
@@ -249,10 +269,16 @@ namespace Starbot
         private static readonly int StopDelay = 16;
         private static void AdvanceMove()
         {
-            int px = Game1.player.getTileX();
-            int py = Game1.player.getTileY();
-            if (px < MoveTargetX) StartMovingRight();
-            else if (px > MoveTargetX) StartMovingLeft();
+            float px = Game1.player.Position.X;
+            float py = Game1.player.Position.Y;
+
+            float tx = ((float)MoveTargetX * Game1.tileSize);// + (Game1.tileSize / 2);
+            float ty = ((float)MoveTargetY * Game1.tileSize) + (Game1.tileSize / 3);
+
+            float epsilon = Game1.tileSize * 0.1f;
+
+            if (tx - px > epsilon) StartMovingRight();
+            else if (px - tx > epsilon) StartMovingLeft();
             else
             {
                 if (StopX > StopDelay)
@@ -264,8 +290,8 @@ namespace Starbot
                 else StopX++;
             }
 
-            if (py < MoveTargetY) StartMovingDown();
-            else if (py > MoveTargetY) StartMovingUp();
+            if (ty - py > epsilon) StartMovingDown();
+            else if (py - ty > epsilon) StartMovingUp();
             else
             {
                 if (StopY > StopDelay)
@@ -276,7 +302,8 @@ namespace Starbot
                 }
                 else StopY++;
             }
-            if(px == MoveTargetX && py == MoveTargetY)
+
+            if(Math.Abs(px - tx) < epsilon && Math.Abs(py - ty) < epsilon)
             {
                 ClearMoveTarget();
             }
@@ -316,7 +343,15 @@ namespace Starbot
 
         public static void Update()
         {
+            if (!Routing.Ready) return;
+
             Mod.Input.Update();
+
+            //cutscenes break it anyway
+            if (Game1.eventUp)
+            {
+                WantsToStop = true;
+            }
 
             //are we waiting on action button
             if (ActionButtonTimer > 0)
@@ -347,19 +382,7 @@ namespace Starbot
                 }
                 return;
             }
-            //are we waiting on facing
-            if (FaceTimer > 0)
-            {
-                FaceTimer--;
-                if(FaceTimer == 0)
-                {
-                    StopMovingDown();
-                    StopMovingLeft();
-                    StopMovingRight();
-                    StopMovingUp();
-                }
-                return;
-            }
+
             //only update navigation while navigation is possible
             if (Context.CanPlayerMove)
             {
@@ -389,17 +412,17 @@ namespace Starbot
                 }
 
                 //on logical location change
-                if(Game1.currentLocation.Name != LastLocationName)
+                if(Game1.currentLocation.NameOrUniqueName != LastLocationName)
                 {
                     if (OpeningDoor)
                     {
                         StopActionButton();
                         OpeningDoor = false;
                     }
-                    LastLocationName = Game1.currentLocation.Name;
+                    LastLocationName = Game1.currentLocation.NameOrUniqueName;
                     ClearMoveTarget();
                     ReleaseKeys();
-                    if(IsRouting && Route[0] == Game1.currentLocation.Name) AdvanceRoute();
+                    if(IsRouting && Route[0] == Game1.currentLocation.NameOrUniqueName) AdvanceRoute();
                 }
 
                 if (OpeningDoor)
@@ -419,7 +442,7 @@ namespace Starbot
                         //check for route destination and announce
                         if (HasRoutingDestination && px == RoutingDestinationX && py == RoutingDestinationY)
                         {
-                            Mod.instance.Monitor.Log("Routing complete.", LogLevel.Alert);
+                            //Mod.instance.Monitor.Log("Routing complete.", LogLevel.Alert);
                             ClearMoveTarget();
                             ClearPathfindingDestination();
                             ClearRoutingDestination();
@@ -504,8 +527,11 @@ namespace Starbot
                     if(Game1.player.items[index] == t)
                     {
                         //found it
-                        Mod.instance.Monitor.Log("Equipping tool: " + name, LogLevel.Info);
-                        Game1.player.CurrentToolIndex = index;
+                        if(Game1.player.CurrentToolIndex != index)
+                        {
+                            Mod.instance.Monitor.Log("Equipping tool: " + name, LogLevel.Info);
+                            Game1.player.CurrentToolIndex = index;
+                        }
                         return true;
                     }
                 }
@@ -518,7 +544,8 @@ namespace Starbot
         private static void DoOpenDoor()
         {
             OpeningDoor = true;
-            StartMovingUp();
+            //StartMovingUp();
+            FaceTile(Game1.player.getTileX(), Game1.player.getTileY() - 1);
             StartActionButton();
         }
 
@@ -581,31 +608,11 @@ namespace Starbot
             Mod.Input.StopUseTool();
         }
 
-        private static readonly int FaceTime = 15;
-        private static int FaceTimer = 0;
-
-        public static void FaceLeft()
+        public static void FaceTile(int x, int y)
         {
-            FaceTimer = FaceTime;
-            StartMovingLeft();
-        }
-
-        public static void FaceRight()
-        {
-            FaceTimer = FaceTime;
-            StartMovingRight();
-        }
-
-        public static void FaceUp()
-        {
-            FaceTimer = FaceTime;
-            StartMovingUp();
-        }
-
-        public static void FaceDown()
-        {
-            FaceTimer = FaceTime;
-            StartMovingDown();
+            var v = new Vector2(((float)x * Game1.tileSize) + (Game1.tileSize / 2f), ((float)y * Game1.tileSize) + (Game1.tileSize / 2f));
+            Game1.player.faceGeneralDirection(v);
+            Game1.setMousePosition(Utility.Vector2ToPoint(Game1.GlobalToLocal(v)));
         }
 
         private static void StartMovingDown()
@@ -677,9 +684,12 @@ namespace Starbot
                 Mod.instance.Monitor.Log("Responding to dialogue with selection: " + responses[selection].responseKey);
                 Game1.currentLocation.answerDialogue(responses[selection]);
                 Game1.dialogueUp = false;
-                Game1.activeClickableMenu = null;
-                Game1.playSound("dialogueCharacterClose");
-                Game1.currentDialogueCharacterIndex = 0;
+                if (!Game1.IsMultiplayer)
+                {
+                    Game1.activeClickableMenu = null;
+                    Game1.playSound("dialogueCharacterClose");
+                    Game1.currentDialogueCharacterIndex = 0;
+                }
             }
         }
     }

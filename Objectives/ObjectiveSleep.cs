@@ -10,6 +10,8 @@ namespace Starbot.Objectives
     class ObjectiveSleep : Objective
     {
         public override string AnnounceMessage => "Going to sleep";
+        public override string UniquePoolId => "sleep";
+        public override bool Cooperative => true; //not exclusive to a single player
 
         public ObjectiveSleep()
         {
@@ -27,7 +29,7 @@ namespace Starbot.Objectives
             base.Step();
 
             //step one: route to the homelocation
-            if (Game1.player.homeLocation != Game1.player.currentLocation.Name)
+            if (Game1.player.homeLocation != Game1.player.currentLocation.NameOrUniqueName)
             {
                 Core.RouteTo(Game1.player.homeLocation, critical: true);
                 return;
@@ -44,7 +46,7 @@ namespace Starbot.Objectives
             var fh = Game1.player.currentLocation as StardewValley.Locations.FarmHouse;
             var bed = fh.getBedSpot();
 
-            Core.RouteTo(Game1.player.currentLocation.Name, bed.X, bed.Y, true);
+            Core.RouteTo(Game1.player.currentLocation.NameOrUniqueName, bed.X, bed.Y, true);
         }
 
         public override void CantMoveUpdate()

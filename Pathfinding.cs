@@ -21,7 +21,7 @@ namespace Starbot.Pathfinder
 
     public class Pathfinder
     {
-        public static List<Tuple<int,int>> FindPath(GameLocation location, int startX, int startY, int targetX, int targetY)
+        public static List<Tuple<int,int>> FindPath(GameLocation location, int startX, int startY, int targetX, int targetY, int cutoff = -1)
         {
             Location current = null;
             Location start = new Location { X = startX, Y = startY };
@@ -45,6 +45,13 @@ namespace Starbot.Pathfinder
 
                 // if closed contains destination, we're done
                 if (closedList.FirstOrDefault(l => l.X == target.X && l.Y == target.Y) != null) break;
+
+                // if closed has exceed cutoff, break out and fail
+                if (cutoff > 0 && closedList.Count > cutoff)
+                {
+                    //Mod.instance.Monitor.Log("Breaking out of pathfinding, cutoff exceeded");
+                    return null;
+                }
 
                 var adjacentSquares = GetWalkableAdjacentSquares(current.X, current.Y, location, openList);
                 g = current.G + 1;
@@ -87,7 +94,7 @@ namespace Starbot.Pathfinder
             if (current == null) return null;
             if (current.X != targetX || current.Y != targetY)
             {
-                Mod.instance.Monitor.Log("No path available.", StardewModdingAPI.LogLevel.Warn);
+                //Mod.instance.Monitor.Log("No path available.", StardewModdingAPI.LogLevel.Warn);
                 return null;
             }
 
@@ -154,6 +161,31 @@ namespace Starbot.Pathfinder
             bool isOnMap = location.isTileOnMap(v);
             bool isOccupied = location.isTileOccupiedIgnoreFloors(v, "");
             bool isPassable = location.isTilePassable(new xTile.Dimensions.Location((int)x, (int)y), Game1.viewport);
+            //check for bigresourceclumps on the farm
+            if(location is Farm)
+            {
+                var fff = location as Farm;
+                foreach(var brc in fff.largeTerrainFeatures)
+                {
+                    var r = brc.getBoundingBox();
+                    var xx = x;
+                    var yy = y;
+                    if (xx > r.X && xx < r.X + r.Width && yy > r.Y && yy < r.Y + r.Height) return false;
+                }
+            }
+            if (location is StardewValley.Locations.BuildableGameLocation)
+            {
+                var bgl = location as StardewValley.Locations.BuildableGameLocation;
+                foreach (var b in bgl.buildings)
+                {
+                    if (!b.isTilePassable(v)) return false;
+                }
+            }
+            if(location is StardewValley.Locations.BuildableGameLocation || location is Farm)
+            {
+                //more aggressive test. doesn't like floors
+                if (location.isCollidingPosition(new Rectangle((x * 64) + 2, (y * 64) + 2, 60, 60), Game1.viewport, true, 0, false, null, false, false, true)) return false;
+            }
             return (isWarp || (isOnMap && !isOccupied && isPassable)); //warps must be passable even off-map
         }
 

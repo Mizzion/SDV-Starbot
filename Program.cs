@@ -19,7 +19,10 @@ namespace Starbot
 
             Helper.Events.Input.ButtonPressed += Input_ButtonPressed;
             Helper.Events.GameLoop.UpdateTicked += GameLoop_UpdateTicked;
+            Helper.Events.Multiplayer.ModMessageReceived += Routing.Multiplayer_ModMessageReceived;
         }
+
+
 
         private void GameLoop_UpdateTicked(object sender, UpdateTickedEventArgs e)
         {
@@ -55,7 +58,7 @@ namespace Starbot
 
             else if(e.Button == SButton.F)
             {
-                Monitor.Log("Player location: " + StardewValley.Game1.player.getTileX() + ", " + StardewValley.Game1.player.getTileY());
+                Monitor.Log("Player location: " + StardewValley.Game1.player.currentLocation.NameOrUniqueName + ", " + StardewValley.Game1.player.getTileX() + ", " + StardewValley.Game1.player.getTileY());
             }
         }
 

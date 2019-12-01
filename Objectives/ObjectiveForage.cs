@@ -11,6 +11,11 @@ namespace Starbot.Objectives
     public class ObjectiveForage : Objective
     {
         public override string AnnounceMessage => "Forage the " + targetMap;
+
+        public override string UniquePoolId => "forage." + targetMap;
+
+        public override bool Cooperative => false;
+
         string targetMap;
         public List<Tuple<int, int, bool>> ForageSpots = new List<Tuple<int, int, bool>>();
         bool hasScanned = false;
@@ -38,7 +43,7 @@ namespace Starbot.Objectives
             base.Step();
 
             //step one: are we on the beach? no? route to the beach.
-            if(Game1.player.currentLocation.Name != targetMap)
+            if(Game1.player.currentLocation.NameOrUniqueName != targetMap)
             {
                 if (!Core.IsRouting)
                 {
@@ -81,21 +86,27 @@ namespace Starbot.Objectives
                 WasRoutingToForage = true;
 
                 //check hotbar for hoe
-                Core.EquipToolIfOnHotbar("Hoe"); //in case of worms
+                if(spot.Item3) Core.EquipToolIfOnHotbar("Hoe"); //in case of worms
 
                 int x = spot.Item1;
                 int y = spot.Item2;
                 //try to route to the tile below it
-                if(!Core.RouteTo(targetMap, x, y + 1))
+                List<Tuple<string, int, int>> sides = new List<Tuple<string, int, int>>();
+                sides.Add(new Tuple<string, int, int>(targetMap, x, y + 1));
+                sides.Add(new Tuple<string, int, int>(targetMap, x, y - 1));
+                sides.Add(new Tuple<string, int, int>(targetMap, x + 1, y));
+                sides.Add(new Tuple<string, int, int>(targetMap, x - 1, y));
+                sides.Shuffle();
+                if (!Core.RouteTo(sides[0].Item1, sides[0].Item2, sides[0].Item3))
                 {
                     //try to route to the tile above it
-                    if(!Core.RouteTo(targetMap, x, y  - 1))
+                    if(!Core.RouteTo(sides[1].Item1, sides[1].Item2, sides[1].Item3))
                     {
                         //try to route to the tile right of it
-                        if(!Core.RouteTo(targetMap, x + 1, y))
+                        if(!Core.RouteTo(sides[2].Item1, sides[2].Item2, sides[2].Item3))
                         {
                             //try the tile left of it
-                            if(!Core.RouteTo(targetMap, x - 1, y))
+                            if(!Core.RouteTo(sides[3].Item1, sides[3].Item2, sides[3].Item3))
                             {
                                 //we can't reach this one. remove it from the list
                                 ForageSpots.RemoveAt(0);
@@ -123,10 +134,7 @@ namespace Starbot.Objectives
                     int px = Game1.player.getTileX();
                     int py = Game1.player.getTileY();
 
-                    if (y < py) Core.FaceUp();
-                    else if (y > py) Core.FaceDown();
-                    if (x < px) Core.FaceLeft();
-                    else if (x > px) Core.FaceRight();
+                    Core.FaceTile(x, y);
 
                     WasRoutingToForage = false;
                     return;
@@ -134,6 +142,8 @@ namespace Starbot.Objectives
 
                 //pick
                 bool hoeSpot = spot.Item3;
+                Core.FaceTile(spot.Item1, spot.Item2);
+                
                 if (hoeSpot) Core.SwingTool();
                 else Core.DoActionButton();
                 Mod.instance.Monitor.Log("Pick!", StardewModdingAPI.LogLevel.Warn);
